@@ -283,7 +283,10 @@ function filteredTickets(){
 function render(){
   var root = document.getElementById("app-root");
   if (fatalError){ root.innerHTML = tplFatal(fatalError); return; }
-  if (!booted){ root.innerHTML = tplLoading(); return; }
+  if (!booted){
+    root.innerHTML = connError ? tplFatal(connError, "Can’t connect yet") : tplLoading();
+    return;
+  }
   root.innerHTML = tplApp();
   wireEvents(root);
 }
@@ -292,9 +295,9 @@ function tplLoading(){
   return '<div class="app-loading">Loading tracker…</div>';
 }
 
-function tplFatal(msg){
+function tplFatal(msg, heading){
   return (
-    '<div class="app-fatal"><div class="app-fatal-box"><h2>Tracker isn’t set up yet</h2>' +
+    '<div class="app-fatal"><div class="app-fatal-box"><h2>' + esc(heading || "Tracker isn’t set up yet") + '</h2>' +
     '<p>' + esc(msg) + '</p>' +
     '<p>See <code>README.md</code> in this project for setup steps.</p>' +
     "</div></div>"
@@ -1192,6 +1195,16 @@ function init(){
 
   window.addEventListener("scroll", handleScroll, { passive:true });
   startListeners();
+
+  // Safety net: if Firestore never calls us back at all (success or error) —
+  // e.g. the project ID in firebase-config.js doesn't exist, or something
+  // network-level is blocking it — don't sit on "Loading tracker…" forever.
+  setTimeout(function(){
+    if (!booted && !fatalError && !connError){
+      connError = "Still nothing back from Firestore after 10 seconds. Double-check the values in firebase-config.js match your Firebase project exactly, and that Firestore Database is enabled in that project.";
+      render();
+    }
+  }, 10000);
 }
 
 if (document.readyState === "loading"){
