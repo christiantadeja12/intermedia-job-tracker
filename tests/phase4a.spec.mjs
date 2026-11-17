@@ -27,12 +27,13 @@ test('nickname guide: one warning, then the therapist can still choose to keep i
   await page.waitForFunction(() => window.__ocean.A.data.fish.some(f => f.nickname === 'Andy'));
 });
 
-test('family summary: approved milestones only, no private notes or client label, prints cleanly', async ({ page }) => {
+test('family summary: milestones only when shown to the family, no private notes or client label, prints cleanly', async ({ page }) => {
   await openOcean(page);
   await unlockAdmin(page);
   const facts = await page.evaluate(() => {
     const o = window.__ocean, f = o.A.data.fish.find(x => x.nickname === 'Tala'), achs = o.A.data.achievements.filter(a => a.fishId === f.id && a.status === 'active');
-    return {id: f.id, shown: achs.filter(a => a.publicVisible).map(a => a.title), hidden: achs.filter(a => !a.publicVisible).map(a => a.title),
+    const on = o.A.data.clients.find(c => c.id === f.clientId).familyShowcase;
+    return {id: f.id, on, shown: on ? achs.map(a => a.title) : [], hidden: on ? [] : achs.map(a => a.title),
       notes: achs.map(a => a.privateNote).filter(Boolean), label: o.A.data.clients.find(c => c.id === f.clientId).label};
   });
   expect(facts.shown.length).toBeGreaterThan(0);

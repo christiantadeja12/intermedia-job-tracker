@@ -443,7 +443,6 @@ test('therapist awards: duplicate counted once, evolution once, aquarium updates
     await page.selectOption('#aw-fish', await pipId(page));
     await page.check(`input[name=aw-units][value="${units}"]`, {force: true});
     await page.fill('#aw-title', title); await page.fill('#aw-desc', 'I did it: ' + title); await page.fill('#aw-note', 'Fictional private note');
-    await page.check('#aw-share');
     if (double) await page.evaluate(() => { const f = document.getElementById('aw'); f.requestSubmit(); f.requestSubmit(); });
     else await page.click('#aw-save');
     await page.locator('#dn-again').waitFor();

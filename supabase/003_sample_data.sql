@@ -135,3 +135,13 @@ begin
   perform public.sync_fish('5ce9cc33-95a6-519f-8c76-c9e6dfc99ba7');
   insert into public.audit_events (actor, action, summary) values (v_user, 'sample.loaded', 'Loaded 8 fictional sample fish for testing');
 end $$;
+
+-- If 014_sharing_expiry_delete.sql has run, the sample fish whose families consented show their milestones
+-- (family aquarium and main aquarium), like the page's demo does. Does nothing before 014.
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'clients' and column_name = 'family_showcase') then
+    update public.clients set family_showcase = share_consent, aquarium_showcase = share_consent
+     where private_label ~ '^Sample client [A-Z] \(fictional\)$';
+  end if;
+end $$;
