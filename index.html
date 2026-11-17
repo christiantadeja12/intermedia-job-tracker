@@ -449,7 +449,7 @@ html.hc{--muted:#1f3542;--line:#58808c;--lagoon-d:#0b5f70}
       <p class="p-empty" id="p-ms-empty" hidden></p>
       <button class="more" id="p-more" type="button" hidden></button>
     </section>
-    <p class="p-note" id="p-note">Only milestones the therapist has approved for sharing appear here.</p>
+    <p class="p-note" id="p-note">Only milestones the therapist has chosen to show appear here.</p>
   </div>
 </div>
 
@@ -568,7 +568,7 @@ function colorsFromPalette(sp, p){
   return {...pal, belly: mix(pal.body, '#ffffff', .5), edge: mix(pal.body, '#0d1b2a', .55)};
 }
 const STAGES = ['Tiny Fish','Growing Fish','Vibrant Fish','Majestic Fish','Ocean Champion'];
-const UNITS_PER_LEVEL = 10; // integer half-star units: 1 = half star, 2 = full star
+const UNITS_PER_LEVEL = 7; // integer half-star units: 1 = half star, 2 = full star. 7 units = 3.5 stars to evolve (keep in step with units_per_level() in the database)
 const ROMAN = ['','I','II','III','IV','V','VI','VII','VIII','IX','X'];
 const stageName = lv => lv <= 5 ? STAGES[lv - 1] : 'Ocean Champion ' + (ROMAN[lv - 4] || (lv - 4));
 /* ---------- Child-facing words: English or Filipino (Phase 4B). The therapist area stays in English. ---------- */
@@ -624,10 +624,10 @@ const TXT = {
     'evo.eyebrow':'Evolution!', 'evo.h':'{nick} evolved into {aStage}!', 'evo.p':'Level {n}. Five fresh stars to fill next.', 'evo.ok':'Hooray!',
     'evo.say':'{nick} evolved into {aStage}, level {n}.',
     'p.eyebrow':'Achievement profile', 'p.level':'Level {n} · {stage}', 'p.champ':'Champion evolution {k}', 'p.top':'Top of the ladder, still growing', 'p.next':'Next: {stage}',
-    'p.stars':'Star progress', 'p.starsSub':'{a} of 5 · {b} to evolve', 'p.starsAria':'{a} of 5 stars toward the next evolution', 'p.life':'Lifetime stars', 'p.ms':'Milestones',
+    'p.stars':'Star progress', 'p.starsSub':'{a} of {c} · {b} to evolve', 'p.starsAria':'{a} of {c} stars toward the next evolution', 'p.life':'Lifetime stars', 'p.ms':'Milestones',
     'p.evolved':'Evolved into {aStage}', 'p.evolvedDesc':'Five stars filled up, so {nick} grew to Level {n}.', 'p.loading':'Loading milestones…',
     'p.noShared':'No shared milestones yet.', 'p.private':'{nick}’s milestones are private.', 'p.fewer':'Show fewer', 'p.all':'Show all {n} milestones',
-    'p.note':'Only milestones the therapist has approved for sharing appear here.', 'p.close':'Close achievements', 'p.open':'{nick}’s achievements are open.',
+    'p.note':'Only milestones the therapist has chosen to show appear here.', 'p.close':'Close achievements', 'p.open':'{nick}’s achievements are open.',
     'units.1':'+½ star', 'units.2':'+1 star',
     'cf.eyebrow':'On this device', 'cf.h':'Comfort settings', 'cf.reset':'Use the therapist’s defaults', 'cf.close':'Close comfort settings', 'cf.resetSay':'Comfort settings now follow the therapist’s defaults.',
     'cf.lang':'Language', 'cf.langD':'Words for children in the aquarium.',
@@ -655,7 +655,7 @@ const TXT = {
     'evo.eyebrow':'Ebolusyon!', 'evo.h':'Naging {stage} si {nick}!', 'evo.p':'Level {n}. Limang bagong bituin ang pupunuin!', 'evo.ok':'Yehey!',
     'evo.say':'Naging {stage} si {nick}, level {n}.',
     'p.eyebrow':'Mga nagawa', 'p.level':'Level {n} · {stage}', 'p.champ':'Ika-{k} ebolusyon ng kampeon', 'p.top':'Nasa tuktok na, lumalaki pa rin', 'p.next':'Susunod: {stage}',
-    'p.stars':'Mga bituin', 'p.starsSub':'{a} sa 5 · {b} pa bago mag-ebolusyon', 'p.starsAria':'{a} sa 5 bituin papunta sa susunod na ebolusyon', 'p.life':'Lahat ng bituin', 'p.ms':'Mga milestone',
+    'p.stars':'Mga bituin', 'p.starsSub':'{a} sa {c} · {b} pa bago mag-ebolusyon', 'p.starsAria':'{a} sa {c} bituin papunta sa susunod na ebolusyon', 'p.life':'Lahat ng bituin', 'p.ms':'Mga milestone',
     'p.evolved':'Naging {stage}', 'p.evolvedDesc':'Napuno ang limang bituin, kaya lumaki si {nick} sa Level {n}.', 'p.loading':'Kinukuha ang mga milestone…',
     'p.noShared':'Wala pang naibahaging milestone.', 'p.private':'Pribado ang mga milestone ni {nick}.', 'p.fewer':'Ipakita nang mas kaunti', 'p.all':'Ipakita lahat ng {n} milestone',
     'p.note':'Dito lang lumalabas ang mga milestone na inaprubahan ng therapist.', 'p.close':'Isara ang mga nagawa', 'p.open':'Bukas na ang mga nagawa ni {nick}.',
@@ -845,26 +845,56 @@ class Store {
     await this.db.doc(P.ach + '/' + id).update({goalArea: area || null});
     await this.audit('achievement.area_changed', {fishId: a.fishId, entity: 'achievement', entityId: id, summary: `Changed the goal area of “${a.title}”`, before: {goalArea: a.goalArea || null}, after: {goalArea: area || null}});
   }
+  /* Milestone sharing per child (replaces the tick on each achievement): one switch for the family aquarium, one for the main aquarium. */
+  async setSharing(fid, family, aquarium){
+    const fish = await this.get(P.fish, fid); if (!fish) throw new Error('fish not found');
+    const client = await this.get(P.clients, fish.clientId), f = !!family, a = !!aquarium;
+    if (!!client.familyShowcase === f && !!client.aquariumShowcase === a) return;
+    await this.db.doc(P.clients + '/' + client.id).update({familyShowcase: f, aquariumShowcase: a});
+    await this.audit('sharing.updated', {fishId: fid, entity: 'fish', entityId: fid, summary: `Changed milestone sharing for ${fish.nickname}`,
+      before: {family: !!client.familyShowcase, aquarium: !!client.aquariumShowcase}, after: {family: f, aquarium: a}});
+    await this.syncFish(fid);
+  }
+  /* Permanently delete every archived fish (therapist only; the page asks twice first). Active fish are never touched. */
+  async deleteArchivedFish(){
+    const gone = (await this.db.collection(P.fish).get()).docs.filter(d => d.data().archivedAt).map(d => ({id: d.id, ...d.data()}));
+    if (!gone.length) return 0;
+    const ids = new Set(gone.map(f => f.id));
+    for (const f of gone){
+      for (const d of (await this.db.collection(P.ach).where('fishId', '==', f.id).get()).docs) await this.db.doc(P.ach + '/' + d.id).delete();
+      for (const d of (await this.db.collection(P.evo).where('fishId', '==', f.id).get()).docs) await this.db.doc(P.evo + '/' + d.id).delete();
+      for (const d of (await this.db.collection('familyLinks').where('fishId', '==', f.id).get()).docs) await this.db.doc('familyLinks/' + d.id).delete();
+      await this.db.doc(P.pubFish + '/' + f.id).delete(); await this.db.doc(P.pubTl + '/' + f.id).delete();
+      await this.db.doc(P.fish + '/' + f.id).delete();
+      if (f.clientId) await this.db.doc(P.clients + '/' + f.clientId).delete();
+    }
+    for (const d of (await this.db.collection(P.audit).get()).docs) if (ids.has(d.data().fishId)) await this.db.doc(P.audit + '/' + d.id).delete();
+    await this.audit('archived.deleted', {summary: `Permanently deleted ${gone.length} archived fish`});
+    return gone.length;
+  }
   /* Family links (Phase 4C). The demo keeps them in memory; the Claude artifact version can't offer them (its viewers can't reach private records). */
-  async createFamilyLink(fid){
+  async createFamilyLink(fid, duration = 'week'){
     if (this.mode !== 'demo') throw Object.assign(new Error('Family links need the Supabase version of Little Ocean.'), {friendly: true});
+    const days = {day: 1, week: 7, month: 30}[duration]; if (!days) throw new Error('unknown duration');
+    const expiresAt = new Date(Date.now() + days * 864e5).toISOString();
     const token = [...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, '0')).join('');
     for (const d of (await this.db.collection('familyLinks').where('fishId', '==', fid).get()).docs) if (!d.data().revokedAt) await this.db.doc('familyLinks/' + d.id).update({revokedAt: this.now()});
-    await this.db.doc('familyLinks/' + await sha256(token)).set({fishId: fid, createdAt: this.now(), revokedAt: null, lastUsedAt: null});
-    const f = await this.get(P.fish, fid); await this.audit('family_link.created', {fishId: fid, entity: 'fish', entityId: fid, summary: `Made a new family link for ${f ? f.nickname : 'a fish'}`});
-    return token;
+    await this.db.doc('familyLinks/' + await sha256(token)).set({fishId: fid, createdAt: this.now(), expiresAt, revokedAt: null, lastUsedAt: null});
+    const f = await this.get(P.fish, fid); await this.audit('family_link.created', {fishId: fid, entity: 'fish', entityId: fid, summary: `Made a new family link for ${f ? f.nickname : 'a fish'} (${duration})`});
+    return {token, expiresAt};
   }
   async revokeFamilyLink(fid){
     let n = 0;
     for (const d of (await this.db.collection('familyLinks').where('fishId', '==', fid).get()).docs) if (!d.data().revokedAt){ await this.db.doc('familyLinks/' + d.id).update({revokedAt: this.now()}); n++; }
     const f = await this.get(P.fish, fid); if (n) await this.audit('family_link.revoked', {fishId: fid, entity: 'fish', entityId: fid, summary: `Turned off the family link for ${f ? f.nickname : 'a fish'}`});
   }
-  async familyLinks(){ if (this.mode !== 'demo') return []; return (await this.db.collection('familyLinks').get()).docs.map(d => d.data()).filter(l => !l.revokedAt).map(l => ({fishId: l.fishId, createdAt: l.createdAt, lastUsedAt: l.lastUsedAt})); }
+  async familyLinks(){ if (this.mode !== 'demo') return []; return (await this.db.collection('familyLinks').get()).docs.map(d => d.data()).filter(l => !l.revokedAt).map(l => ({fishId: l.fishId, createdAt: l.createdAt, lastUsedAt: l.lastUsedAt, expiresAt: l.expiresAt || null})); }
   async familyView(token){
     if (this.mode !== 'demo' || !/^[0-9a-f]{64}$/.test(token || '')) return null;
-    const l = await this.get('familyLinks', await sha256(token)); if (!l || l.revokedAt) return null;
+    const l = await this.get('familyLinks', await sha256(token)); if (!l || l.revokedAt || (l.expiresAt && l.expiresAt <= this.now())) return null;
     const pub = await this.get(P.pubFish, l.fishId); if (!pub) return null;
-    const ach = (await this.byFish(P.ach, l.fishId)).filter(a => a.status === 'active' && a.publicVisible), evo = (await this.byFish(P.evo, l.fishId)).filter(e => !e.reversedAt);
+    const frow = await this.get(P.fish, l.fishId), crow = frow ? await this.get(P.clients, frow.clientId) : null;
+    const ach = (await this.byFish(P.ach, l.fishId)).filter(a => a.status === 'active' && crow && crow.familyShowcase), evo = (await this.byFish(P.evo, l.fishId)).filter(e => !e.reversedAt);
     const items = ach.map(a => ({type: 'a', date: a.achievedAt, title: a.title, desc: a.publicDescription, units: a.units, k: a.achievedAt + '|' + a.createdAt}))
       .concat(evo.map(e => ({type: 'e', date: e.achievedOn, to: e.toLevel, k: e.achievedOn + '|~' + String(e.toLevel).padStart(3, '0')})))
       .sort((x, y) => x.k < y.k ? 1 : -1).map(({k, ...r}) => r);
@@ -934,7 +964,7 @@ class Store {
     let items = [];
     if (share){
       items = [
-        ...d.active.filter(a => a.publicVisible).map(a => ({type:'a', date:a.achievedAt, title:a.title, desc:a.publicDescription, units:a.units, k:a.achievedAt + '|' + a.createdAt})),
+        ...(client && client.aquariumShowcase ? d.active : []).map(a => ({type:'a', date:a.achievedAt, title:a.title, desc:a.publicDescription, units:a.units, k:a.achievedAt + '|' + a.createdAt})),
         ...d.evolutions.map(e => ({type:'e', date:e.achievedOn, to:e.toLevel, k:e.achievedOn + '|~' + String(e.toLevel).padStart(3, '0')})),
       ].sort((x, y) => x.k < y.k ? 1 : -1).map(({k, ...r}) => r);
     }
@@ -943,7 +973,7 @@ class Store {
   }
   async createFish(v){
     const cid = newId('c'), fid = newId('f'), now = this.now();
-    await this.db.doc(P.clients + '/' + cid).set({label: v.label.trim(), shareConsent: !!v.consent, consentUpdatedAt: now, createdAt: now, archivedAt: null});
+    await this.db.doc(P.clients + '/' + cid).set({label: v.label.trim(), shareConsent: !!v.consent, familyShowcase: false, aquariumShowcase: false, consentUpdatedAt: now, createdAt: now, archivedAt: null});
     await this.db.doc(P.fish + '/' + fid).set({clientId: cid, nickname: v.nickname.trim(), species: v.species, palette: v.palette, persona: v.persona, units: 0, level: 1, order: Date.now(), createdAt: now, updatedAt: now, archivedAt: null});
     await this.audit('fish.created', {fishId: fid, entity:'fish', entityId: fid, summary:`Added ${v.nickname.trim()} (${SPECIES[v.species].label})`,
       after: {nickname: v.nickname.trim(), species: v.species, persona: v.persona, sharing: !!v.consent}});
@@ -1070,7 +1100,7 @@ class Store {
   async seedSample(){
     for (const [i, s] of SAMPLE.entries()){
       const n = i + 1, cid = 'c_s' + n, fid = 'f_s' + n;
-      await this.db.doc(P.clients + '/' + cid).set({label:`Sample client ${'ABCDEFGH'[i]} (fictional)`, shareConsent: s.share, consentUpdatedAt:'2026-06-01T09:00:00+08:00', createdAt:'2026-06-01T09:00:00+08:00', archivedAt:null});
+      await this.db.doc(P.clients + '/' + cid).set({label:`Sample client ${'ABCDEFGH'[i]} (fictional)`, shareConsent: s.share, familyShowcase: s.share, aquariumShowcase: s.share, consentUpdatedAt:'2026-06-01T09:00:00+08:00', createdAt:'2026-06-01T09:00:00+08:00', archivedAt:null});
       await this.db.doc(P.fish + '/' + fid).set({clientId: cid, nickname: s.nick, species: s.sp, palette: {...SPECIES[s.sp].pal}, persona: s.persona, units: 0, level: 1, order: n, createdAt:'2026-06-01T09:00:00+08:00', updatedAt:'2026-06-01T09:00:00+08:00', archivedAt:null});
       for (const [k, it] of sampleHistory(i, s.units).entries()){
         const aid = `a_s${n}_${String(k + 1).padStart(2, '0')}`;
@@ -1165,9 +1195,9 @@ class SupabaseStore extends Store {
       for (const s of f.subs) if (s.err) s.err(e);
     }
   }
-  async createFamilyLink(fid){ return this.rpc('create_family_link', {p_fish: fid}); }
+  async createFamilyLink(fid, duration = 'week'){ const r = await this.rpc('create_family_link', {p_fish: fid, p_duration: duration}); this.bump('audit'); return {token: r.token, expiresAt: r.expiresAt}; }
   async revokeFamilyLink(fid){ await this.rpc('revoke_family_link', {p_fish: fid}); this.bump('audit'); }
-  async familyLinks(){ return (await this.q(this.sb.from('family_links').select('fish_id,created_at,last_used_at').is('revoked_at', null))).map(r => ({fishId: r.fish_id, createdAt: r.created_at, lastUsedAt: r.last_used_at})); }
+  async familyLinks(){ return (await this.q(this.sb.from('family_links').select('fish_id,created_at,last_used_at,expires_at').is('revoked_at', null))).map(r => ({fishId: r.fish_id, createdAt: r.created_at, lastUsedAt: r.last_used_at, expiresAt: r.expires_at})); }
   async familyView(token){
     const r = await this.sb.rpc('family_view', {p_token: token}); if (r.error) throw r.error;
     const v = r.data; if (!v) return null;
@@ -1212,7 +1242,7 @@ class SupabaseStore extends Store {
         order: Number(r.sort_order) || 0, createdAt: r.created_at, archivedAt: r.archived_at}));
       case 'areas': return (await this.all('goal_areas')).map(r => ({id: r.id, nameEn: r.name_en, nameFil: r.name_fil, sort: r.sort, archivedAt: r.archived_at}));
       case 'templates': return (await this.all('milestone_templates')).map(r => ({id: r.id, area: r.area, units: r.units, titleEn: r.title_en, descEn: r.desc_en, titleFil: r.title_fil, descFil: r.desc_fil, sort: r.sort, archivedAt: r.archived_at}));
-      case 'clients': return (await this.all('clients')).map(r => ({id: r.id, label: r.private_label, shareConsent: r.share_consent, archivedAt: r.archived_at}));
+      case 'clients': return (await this.all('clients')).map(r => ({id: r.id, label: r.private_label, shareConsent: r.share_consent, familyShowcase: !!r.family_showcase, aquariumShowcase: !!r.aquarium_showcase, archivedAt: r.archived_at}));
       case 'achievements': return (await this.all('achievements')).map(mapAch);
       case 'evolutions': return (await this.all('evolutions')).map(r => ({id: r.id, fishId: r.fish_id, fromLevel: r.from_level, toLevel: r.to_level, occurredAt: r.occurred_at,
         achievedOn: r.achieved_on, reversedAt: r.reversed_at, restoredAt: r.restored_at}));
@@ -1232,6 +1262,8 @@ class SupabaseStore extends Store {
   async createFish(v){ const id = await this.rpc('create_fish', this.fishArgs(v)); this.afterFishChange(); return id; }
   async updateFish(fid, v){ await this.rpc('update_fish', {p_fish: fid, ...this.fishArgs(v)}); this.afterFishChange(); }
   async setArchived(fid, archived){ await this.rpc('set_fish_archived', {p_fish: fid, p_archived: archived}); this.afterFishChange(); }
+  async setSharing(fid, family, aquarium){ await this.rpc('set_client_sharing', {p_fish: fid, p_family: !!family, p_aquarium: !!aquarium}); this.afterFishChange(); }
+  async deleteArchivedFish(){ const n = await this.rpc('delete_archived_fish', {}); this.afterFishChange(); return Number(n) || 0; }
   async award(v){
     const r = await this.rpc('award_achievement', {p_fish: v.fishId, p_units: v.units, p_title: v.title.trim(), p_public_description: v.desc.trim(), p_private_note: (v.note || '').trim(),
       p_achieved_at: v.date, p_public_visible: !!v.publicVisible, p_idempotency_key: v.key, ...(ALL_AREAS[v.goalArea] ? {p_goal_area: v.goalArea} : {})});
@@ -1348,14 +1380,14 @@ function makeBackupSql(data, meta){
 
 /* ---------- Fictional sample data ---------- */
 const SAMPLE = [
-  {nick:'Tala',   sp:'clown',     persona:'Cheerful zigzagger', units:23, share:true},
+  {nick:'Tala',   sp:'clown',     persona:'Cheerful zigzagger', units:16, share:true},   // totals spaced for 7 half-stars (3.5 stars) per level: Pip L1, Mango L2, Tala L3, Lumi L4, Ziggy L5
   {nick:'Pip',    sp:'puffer',    persona:'Bouncy bobber',      units:6,  share:true},
-  {nick:'Lumi',   sp:'angel',     persona:'Graceful glider',    units:34, share:true},
-  {nick:'Mango',  sp:'tang',      persona:'Speedy explorer',    units:14, share:true},
-  {nick:'Ziggy',  sp:'betta',     persona:'Dreamy drifter',     units:43, share:true},
+  {nick:'Lumi',   sp:'angel',     persona:'Graceful glider',    units:24, share:true},
+  {nick:'Mango',  sp:'tang',      persona:'Speedy explorer',    units:10, share:true},
+  {nick:'Ziggy',  sp:'betta',     persona:'Dreamy drifter',     units:31, share:true},
   {nick:'Pebble', sp:'goby',      persona:'Shy peeker',         units:4,  share:false},
-  {nick:'Sunny',  sp:'butterfly', persona:'Curious circler',    units:27, share:true},
-  {nick:'Bantay', sp:'guppy',     persona:'Brave patroller',    units:17, share:true},
+  {nick:'Sunny',  sp:'butterfly', persona:'Curious circler',    units:17, share:true},
+  {nick:'Bantay', sp:'guppy',     persona:'Brave patroller',    units:11, share:true},
 ];
 const POOL = [
   ['Zipped my jacket','I pulled the zipper all the way up by myself.'],
@@ -2013,9 +2045,8 @@ function drawFamilyHome(g, W, H){
 }
 
 /* ---------- Family PEO bubbles (Phase 2): Person, Environment, Occupation float in the family's aquarium ----------
-   Size = how much emphasis that element has right now (1 to 5). Positions are a pure function of time (slow sine drift),
-   so there is no physics to run; a small push keeps them apart and inside the water, above the house. Each bubble is
-   painted once into a small cached sprite. Family viewers only ever see them; therapists set size and colour. */
+   Size = how much emphasis that element has right now (1 to 5). The three bubbles stick together and float as one group inside
+   the water, above the house. Each bubble is painted once into a small cached sprite. Family viewers only ever see them; therapists set size and colour. */
 const PEO_KEYS = ['person', 'environment', 'occupation'];
 const PEO_DEFAULT = {person: {size: 3, color: '#7ccf8a'}, environment: {size: 3, color: '#6ab7f0'}, occupation: {size: 3, color: '#f4d94e'}};
 const PEO_LABEL = {person: ['Person', 'peo.person'], environment: ['Environment', 'peo.environment'], occupation: ['Occupation', 'peo.occupation']};
@@ -2026,18 +2057,18 @@ function sanitizePeo(p){
 }
 const hexA = (hex, a) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
 const hexLum = hex => (.299*parseInt(hex.slice(1, 3), 16) + .587*parseInt(hex.slice(3, 5), 16) + .114*parseInt(hex.slice(5, 7), 16))/255;
-function paintBubble(g, x, y, r, color, label, part){   // part: 'body' (behind the fish), 'label' (in front of them) or both
+function paintBubble(g, x, y, r, color, label, part, lo){   // part: 'body' (behind the fish), 'label' (in front of them) or both
   g.save();
   if (part !== 'label'){
-  g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = hexA(color, .66); g.fill();
+  g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = hexA(color, .5); g.fill();
   const gr = g.createRadialGradient(x - r*.35, y - r*.4, r*.05, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,.55)'); gr.addColorStop(.55, 'rgba(255,255,255,.05)'); gr.addColorStop(1, 'rgba(255,255,255,.18)');
   g.fillStyle = gr; g.fill(); g.lineWidth = Math.max(1.5, r*.045); g.strokeStyle = 'rgba(255,255,255,.85)'; g.stroke();
   g.beginPath(); g.ellipse(x - r*.38, y - r*.5, r*.2, r*.1, -.6, 0, TAU); g.fillStyle = 'rgba(255,255,255,.7)'; g.fill();
   }
   if (part !== 'body'){
   let fs = clamp(r*.3, 10, 24); const face = n => `600 ${n}px Fredoka, Nunito, system-ui, sans-serif`;
-  g.font = face(fs); while (g.measureText(label).width > r*1.78 && fs > 8){ fs -= .5; g.font = face(fs); }
-  const dark = hexLum(color) > .55; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = face(fs); while (g.measureText(label).width > r*1.4 && fs > 8){ fs -= .5; g.font = face(fs); }
+  const dark = hexLum(color) > .45; g.textAlign = 'center'; g.textBaseline = 'middle'; if (lo){ x += lo[0]*r; y += lo[1]*r; }
   g.lineWidth = 3; g.lineJoin = 'round'; g.strokeStyle = dark ? 'rgba(255,255,255,.55)' : 'rgba(0,0,0,.35)'; g.strokeText(label, x, y + r*.06);
   g.fillStyle = dark ? '#0d2738' : '#fff'; g.fillText(label, x, y + r*.06);
   }
@@ -2049,32 +2080,54 @@ function homeBox(W, H){
 }
 const peoRadius = (size, W, H) => clamp(Math.min(W, H)*.1, 44, 62) * (.66 + .16*size);
 const peoSprites = new Map();
-function peoPlace(W, H, t){
-  const hudH = W < 480 ? 64 : 70, box = homeBox(W, H), calm = state.calm ? .4 : 1, out = [];
-  PEO_KEYS.forEach((k, i) => {
-    const r = peoRadius(famPeo[k].size, W, H), ph = i*2.1;
-    const yMin = hudH + 12 + r, yMax = Math.max(yMin, Math.min(L.sandTop - r - 6, box.y + box.h*.12 - r));
-    const ax = W*[.2, .5, .8][i], ay = lerp(yMin, yMax, [.35, .7, .3][i]), dx = Math.min(W*.05, 42)*calm, dy = Math.min(H*.03, 26)*calm;
-    out.push({k, r, yMin, yMax, x: ax + dx*Math.sin(t*.37 + ph), y: ay + dy*Math.sin(t*.51 + ph*1.3)});
-  });
-  for (let it = 0; it < 3; it++){
-    for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++){
-      const a = out[i], b = out[j], need = (a.r + b.r)*.92 + 4; let vx = b.x - a.x, vy = b.y - a.y, d = Math.hypot(vx, vy);
-      if (d < need){ if (d < .01){ vx = 1; vy = 0; d = 1; } const m = (need - d)/2; a.x -= vx/d*m; a.y -= vy/d*m; b.x += vx/d*m; b.y += vy/d*m; }
-    }
-    for (const a of out){ a.x = clamp(a.x, a.r + 8, W - a.r - 8); a.y = clamp(a.y, a.yMin, a.yMax); }
-  }
-  return out;
+/* The three bubbles cling together (Environment left, Occupation right, Person on top, like the PEO diagram) and float as one
+   group. Poking a bubble pushes the whole group; it then drifts back like a jelly. Everything here is a few multiplications a frame. */
+function peoLayout(r){
+  const S = .69, dEO = (r.environment + r.occupation)*S, dEP = (r.environment + r.person)*S, dOP = (r.occupation + r.person)*S;   // .69 matches the PEO diagram: each circle's edge reaches well past its neighbours' centres, leaving a shared middle
+  const px = (dEP*dEP - dOP*dOP + dEO*dEO)/(2*dEO), py = -Math.sqrt(Math.max(0, dEP*dEP - px*px));
+  const raw = {environment: [0, 0], occupation: [dEO, 0], person: [px, py]};
+  const x0 = Math.min(-r.environment, px - r.person), x1 = Math.max(dEO + r.occupation, px + r.person), y0 = py - r.person, y1 = Math.max(r.environment, r.occupation);
+  const cx = (x0 + x1)/2, cy = (y0 + y1)/2, pos = {};
+  const mx = (raw.environment[0] + raw.occupation[0] + raw.person[0])/3, my = (raw.environment[1] + raw.occupation[1] + raw.person[1])/3, lo = {};
+  for (const k of PEO_KEYS){ pos[k] = [raw[k][0] - cx, raw[k][1] - cy]; const vx = raw[k][0] - mx, vy = raw[k][1] - my, d = Math.hypot(vx, vy) || 1; lo[k] = [vx/d*.3, vy/d*.46]; }   // labels sit on the outer part of each bubble, clear of the overlaps
+  return {pos, lo, bw: x1 - x0, bh: y1 - y0};
+}
+const peoG = {ox: 0, oy: 0, vx: 0, vy: 0, cx: 0, cy: 0, pulse: {person: 0, environment: 0, occupation: 0}};
+let peoLast = [];
+function peoUpdate(dt){
+  if (!familyMode || famState !== 'ok' || !famPeo || !L.bounds) return;
+  const W = state.W, H = state.H, t = state.effects === 'off' ? 0 : state.t/1000, calm = state.calm ? .45 : 1, r = {};
+  for (const k of PEO_KEYS) r[k] = peoRadius(famPeo[k].size, W, H);
+  const lay = peoLayout(r), hudH = W < 480 ? 64 : 70, box = homeBox(W, H);
+  const xLo = 8 + lay.bw/2, xHi = Math.max(xLo, W - 8 - lay.bw/2), yLo = hudH + 12 + lay.bh/2, yHi = Math.max(yLo, Math.min(L.sandTop - 6, box.y + box.h*.12) - lay.bh/2);   // water only: below the buttons, above the house
+  const mx = (xLo + xHi)/2, my = (yLo + yHi)/2, ax = (xHi - xLo)/2*.8*calm, ay = (yHi - yLo)/2*.7*calm;
+  const bx = mx + ax*(.7*Math.sin(t*.21) + .3*Math.sin(t*.47 + 1)), by = my + ay*(.7*Math.sin(t*.17 + 2) + .3*Math.sin(t*.43));
+  const K = 1.3, C = 1.6;   // gentle spring back to the drifting path
+  peoG.vx += (-K*peoG.ox - C*peoG.vx)*dt; peoG.vy += (-K*peoG.oy - C*peoG.vy)*dt; peoG.ox += peoG.vx*dt; peoG.oy += peoG.vy*dt;
+  let gx = bx + peoG.ox, gy = by + peoG.oy;
+  if (gx < xLo){ gx = xLo; peoG.ox = gx - bx; peoG.vx = Math.abs(peoG.vx)*.5; } else if (gx > xHi){ gx = xHi; peoG.ox = gx - bx; peoG.vx = -Math.abs(peoG.vx)*.5; }
+  if (gy < yLo){ gy = yLo; peoG.oy = gy - by; peoG.vy = Math.abs(peoG.vy)*.5; } else if (gy > yHi){ gy = yHi; peoG.oy = gy - by; peoG.vy = -Math.abs(peoG.vy)*.5; }
+  peoG.cx = gx; peoG.cy = gy;
+  peoLast = PEO_KEYS.map((k, i) => ({k, r: r[k], lo: lay.lo[k], x: gx + lay.pos[k][0], y: gy + lay.pos[k][1]}));   // rigid: the bubbles never move relative to each other
+  for (const k of PEO_KEYS) if (peoG.pulse[k] > 0) peoG.pulse[k] = Math.max(0, peoG.pulse[k] - dt*1.5);
+}
+function peoHit(x, y){ let best = null, bd = 1; for (const b of peoLast){ const d = Math.hypot(x - b.x, y - b.y)/b.r; if (d <= bd){ bd = d; best = b; } } return best; }
+function peoPoke(x, y){   // a tap on a bubble pushes the whole group away from the finger and wobbles the bubble
+  if (!familyMode || famState !== 'ok' || state.paused) return false;
+  const b = peoHit(x, y); if (!b) return false;
+  let dx = peoG.cx - x, dy = peoG.cy - y, d = Math.hypot(dx, dy); if (d < 4){ dx = Math.random() - .5; dy = -.5; d = Math.hypot(dx, dy); }
+  const sp = state.calm ? 120 : 220; peoG.vx += dx/d*sp; peoG.vy += dy/d*sp; peoG.pulse[b.k] = 1; return true;
 }
 function drawFamilyPeo(g, W, H, part){
   if (!famPeo) return;
-  const dpr = state.dpr, t = state.effects === 'off' ? 0 : state.t/1000;
-  for (const b of peoPlace(W, H, t)){
-    const label = tr(PEO_LABEL[b.k][1]), key = [b.k, part, label, famPeo[b.k].color, Math.round(b.r), dpr].join('|');
+  const dpr = state.dpr;
+  for (const b of peoLast){
+    const label = tr(PEO_LABEL[b.k][1]), key = [b.k, part, label, famPeo[b.k].color, Math.round(b.r), Math.round(b.lo[0]*100), Math.round(b.lo[1]*100), dpr].join('|');
     let sp = peoSprites.get(key);
     if (!sp){ for (const old of [...peoSprites.keys()]) if (old.startsWith(b.k + '|' + part + '|')) peoSprites.delete(old);
-      const c = document.createElement('canvas'), n = Math.ceil(b.r*2 + 6); c.width = c.height = Math.round(n*dpr); const cg = c.getContext('2d'); cg.setTransform(dpr, 0, 0, dpr, 0, 0); paintBubble(cg, n/2, n/2, b.r, famPeo[b.k].color, label, part); sp = {c, n}; peoSprites.set(key, sp); }
-    g.drawImage(sp.c, b.x - sp.n/2, b.y - sp.n/2, sp.n, sp.n);
+      const c = document.createElement('canvas'), n = Math.ceil(b.r*2.6 + 6); c.width = c.height = Math.round(n*dpr); const cg = c.getContext('2d'); cg.setTransform(dpr, 0, 0, dpr, 0, 0); paintBubble(cg, n/2, n/2, b.r, famPeo[b.k].color, label, part, b.lo); sp = {c, n}; peoSprites.set(key, sp); }
+    const pu = peoG.pulse[b.k], sc = pu > 0 && part === 'body' ? 1 + .1*pu*Math.sin((1 - pu)*14) : 1, n = sp.n*sc;
+    g.drawImage(sp.c, b.x - n/2, b.y - n/2, n, n);
   }
 }
 
@@ -2436,7 +2489,7 @@ function frame(now){
     if (!state.paused){
       state.t += dtms; const dt = dtms/1000;
       for (const f of fish) updateFish(f, dt);
-      updateParts(dt); updateThemeFx(dt);
+      updateParts(dt); updateThemeFx(dt); peoUpdate(dt);
       bubbleClock -= dt;
       if (bubbleClock <= 0 && state.bubbles){ bubbleClock = state.calm ? 1.6 : .55; const v = [state.W*.16, state.W*.44, state.W*.72, state.W*.9][Math.floor(Math.random()*4)]; spawnBubble(v + (Math.random()-.5)*20, L.sandTop + 10, 2 + Math.random()*4, state.calm ? 22 : 34 + Math.random()*16); }
       processEvoQueue();
@@ -2508,7 +2561,7 @@ canvas.addEventListener('pointerup', e => {
 canvas.addEventListener('dblclick', e => e.preventDefault());
 canvas.addEventListener('pointermove', e => {
   if (e.pointerType !== 'mouse') return;
-  const p = localPoint(e), f = hitTest(p.x, p.y); state.hoverFish = f; canvas.style.cursor = f ? 'pointer' : 'default';
+  const p = localPoint(e), f = hitTest(p.x, p.y); state.hoverFish = f; canvas.style.cursor = f || (familyMode && peoHit(p.x, p.y)) ? 'pointer' : 'default';
 });
 canvas.addEventListener('pointerleave', () => { state.hoverFish = null; });
 function handleTap(x, y){
@@ -2517,7 +2570,7 @@ function handleTap(x, y){
     clearTimeout(pending.timer); const f = pending.fish; pending = null; openProfile(f, null); return 'double';
   }
   if (pending){ clearTimeout(pending.timer); const pf = pending.fish; pending = null; fireSingle(pf); }
-  if (!hit) return 'miss';
+  if (!hit) return peoPoke(x, y) ? 'bubble' : 'miss';
   pending = {fish:hit, x, y, time:now, timer:setTimeout(() => { const f = pending && pending.fish; pending = null; if (f) fireSingle(f); }, DOUBLE_MS)};
   return 'pending';
 }
@@ -2536,7 +2589,7 @@ function starSVG(units){
   const stroke = units ? '#c98a05' : '#b6cbd4';
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-star" fill="${fill}" stroke="${stroke}" stroke-width="1.3"/></svg>`;
 }
-const starRow = cur => { let s = ''; for (let i = 0; i < 5; i++) s += starSVG(clamp(cur - i*2, 0, 2)); return s; };
+const starRow = cur => { let s = ''; for (let i = 0; i < Math.ceil(UNITS_PER_LEVEL/2); i++) s += starSVG(clamp(cur - i*2, 0, 2)); return s; };
 function fillProfile(f){
   const d = f.data, pr = d.prog, sp = SPECIES[d.sp];
   $('#p-name').textContent = d.nick;
@@ -2545,7 +2598,7 @@ function fillProfile(f){
   $('#p-evo-sub').textContent = pr.level > 5 ? tr('p.champ', {k: pr.level - 4}) : pr.level === 5 ? tr('p.top') : tr('p.next', {stage: stageT(pr.level + 1)});
   $('#p-ladder').innerHTML = STAGES.map((s, i) => { const n = i + 1, top = Math.min(pr.level, 5), cls = n < top ? 'done' : n === top ? 'now' : ''; return `<li class="${cls}"><span class="dot">${n}</span>${esc(stageT(n))}</li>`; }).join('');
   const st = $('#p-stars'); st.innerHTML = starRow(pr.currentUnits);
-  const sv = {a: fmtStars(pr.currentUnits), b: fmtStars(UNITS_PER_LEVEL - pr.currentUnits)};
+  const sv = {a: fmtStars(pr.currentUnits), b: fmtStars(UNITS_PER_LEVEL - pr.currentUnits), c: fmtStars(UNITS_PER_LEVEL)};
   st.setAttribute('aria-label', tr('p.starsAria', sv));
   $('#p-stars-sub').textContent = tr('p.starsSub', sv);
   $('#p-life').textContent = fmtStars(pr.lifetimeUnits);
@@ -2598,7 +2651,6 @@ async function withPin(title, next){
     });
   });
 }
-const QA_SHARE_KEY = 'lo.qaShare';
 function openQuickAward(fid){
   const p = lastPubs.find(x => x.id === fid); if (!p) return;
   withPin(`Give ${p.nickname} a star`, async () => {
@@ -2624,23 +2676,21 @@ function openQuickAward(fid){
       const first = $('#dlg-body').querySelector('.qa-item'); if (first) first.focus();
     };
     const confirmView = t => {
-      const key = store.newAwardKey(), share = !!lsGet(QA_SHARE_KEY, false);
+      const key = store.newAwardKey();
       const d = {nick: p.nickname, lv: p.level, cur: p.currentUnits};
       const after = d.cur + t.units, evolves = after >= UNITS_PER_LEVEL;
       $('#dlg-body').innerHTML = `<div class="stack">
         <div class="preview" lang="${lang}"><p><span class="pill gold">${unitsLabel(t.units)}</span> <span class="pill area">${esc(areaName(t.area, lang))}</span></p>
           <p style="margin-top:8px"><strong>${esc(tplTitle(t, lang))}</strong></p><p>${esc(tplDesc(t, lang))}</p>
-          <p class="hint" style="margin-top:8px">${evolves ? `${esc(d.nick)} will evolve to Level ${d.lv + 1}!` : `${esc(d.nick)}: ${fmtStars(d.cur)} → ${fmtStars(after)} of 5 stars`} · Today, ${esc(fmtDay(manilaToday()))}</p></div>
-        <label class="check"><input type="checkbox" id="qa-share" ${share ? 'checked' : ''}> Approve the title and description for the shared profile</label>
+          <p class="hint" style="margin-top:8px">${evolves ? `${esc(d.nick)} will evolve to Level ${d.lv + 1}!` : `${esc(d.nick)}: ${fmtStars(d.cur)} → ${fmtStars(after)} of ${fmtStars(UNITS_PER_LEVEL)} stars`} · Today, ${esc(fmtDay(manilaToday()))}</p></div>
         <p class="err" id="qa-err" role="alert"></p>
         <div class="dlg-actions"><button class="btn" type="button" id="qa-back">Back</button><button class="btn primary big" type="button" id="qa-go">Give star</button></div></div>`;
       $('#qa-back').addEventListener('click', list);
-      $('#qa-share').addEventListener('change', e => lsSet(QA_SHARE_KEY, e.target.checked));
       let busy = false;
       $('#qa-go').addEventListener('click', async () => {
         if (busy) return; busy = true; $('#qa-go').disabled = true; $('#qa-go').textContent = 'Saving…';
         try {
-          await store.award({key, fishId: fid, units: t.units, title: tplTitle(t, lang), desc: tplDesc(t, lang), note: '', date: manilaToday(), publicVisible: $('#qa-share').checked, goalArea: t.area});
+          await store.award({key, fishId: fid, units: t.units, title: tplTitle(t, lang), desc: tplDesc(t, lang), note: '', date: manilaToday(), publicVisible: false, goalArea: t.area});
           closeDialog(); showToast(`${unitsLabel(t.units)} for ${p.nickname}!`); announce(`${unitsLabel(t.units)} for ${p.nickname}: ${tplTitle(t, lang)}.`);
         } catch (err) {
           busy = false; $('#qa-go').disabled = false; $('#qa-go').textContent = 'Give star';
@@ -3274,7 +3324,7 @@ function renderOverview(){
         <button class="btn primary big" type="button" data-go="award">Award stars</button>
         <button class="btn" type="button" id="ov-add">Add a fish</button>
         <div class="stack" style="gap:6px"><h3>Privacy defaults</h3>
-          <p class="hint">The aquarium and shared profiles show nicknames, levels and stars only. Achievement titles and descriptions appear when the family has given consent and you approve each one. Private notes never leave this area.</p></div>
+          <p class="hint">The aquarium and shared profiles show nicknames, levels and stars only. Achievement titles and descriptions appear only where you switch on “Show milestones” for that child (family aquarium, main aquarium, or both). Private notes never leave this area.</p></div>
       </section>
     </div></div>`;
   admBody.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => { A.tab = b.dataset.go; renderAdmin(); }));
@@ -3286,15 +3336,15 @@ function renderFishTab(){
   const list = A.data.fish.filter(f => A.showArchived || !f.archivedAt).sort((a, b) => (!!a.archivedAt - !!b.archivedAt) || (a.order - b.order));
   admBody.innerHTML = `<div class="stack">
     <div class="row between"><div><h2 style="margin:0;font:600 1.4rem var(--display)">Fish &amp; clients</h2><p class="hint">Client labels are private. Children and families only ever see the nickname.</p></div>
-      <div class="row"><label class="check"><input type="checkbox" id="fx-arch" ${A.showArchived ? 'checked' : ''}> Show archived</label><button class="btn primary" type="button" id="fx-add">Add a fish</button></div></div>
+      <div class="row"><label class="check"><input type="checkbox" id="fx-arch" ${A.showArchived ? 'checked' : ''}> Show archived</label>${A.showArchived && A.data.fish.some(f => f.archivedAt) && canEditTemplates() && store.mode !== 'live' ? '<button class="btn warn" type="button" id="fx-del">Delete all archived fish…</button>' : ''}<button class="btn primary" type="button" id="fx-add">Add a fish</button></div></div>
     ${list.length ? `<div class="fgrid">${list.map(f => {
       const c = clientById(f.clientId) || {}, d = deriveFish(achFor(f.id));
       return `<article class="fcard ${f.archivedAt ? 'arch' : ''}">
         <canvas data-fid="${esc(f.id)}" aria-hidden="true"></canvas>
         <div><h3>${esc(f.nickname)} <small>${esc(SPECIES[f.species]?.label || '')}</small></h3>
           <p class="lock"><svg aria-hidden="true"><use href="#i-lock"/></svg>${esc(c.label || 'No client label')}</p>
-          <p>Level ${d.level} · ${esc(stageName(d.level))} · ${fmtStars(d.currentUnits)} of 5 stars</p>
-          <div class="row">${c.shareConsent ? '<span class="pill ok">Sharing consent given</span>' : '<span class="pill off">Private only</span>'}${f.archivedAt ? '<span class="pill warn">Archived</span>' : ''}</div></div>
+          <p>Level ${d.level} · ${esc(stageName(d.level))} · ${fmtStars(d.currentUnits)} of ${fmtStars(UNITS_PER_LEVEL)} stars</p>
+          <div class="row">${c.shareConsent ? '<span class="pill ok">Sharing consent given</span>' : '<span class="pill off">Private only</span>'}${c.familyShowcase ? '<span class="pill ok">Milestones: family</span>' : ''}${c.aquariumShowcase ? '<span class="pill ok">Milestones: main aquarium</span>' : ''}${f.archivedAt ? '<span class="pill warn">Archived</span>' : ''}</div></div>
         <div class="fc-actions">
           ${f.archivedAt ? '' : `<button class="btn" type="button" data-act="award" data-id="${esc(f.id)}">Award</button>`}
           <button class="btn" type="button" data-act="history" data-id="${esc(f.id)}">History</button>
@@ -3310,6 +3360,7 @@ function renderFishTab(){
   admBody.querySelectorAll('canvas[data-fid]').forEach(cv => { const f = fishById(cv.dataset.fid); drawMini(cv, fishLook(f.id, f.species, f.palette), deriveFish(achFor(f.id)).level, 72, 52); });
   $('#fx-arch').addEventListener('change', e => { A.showArchived = e.target.checked; renderFishTab(); });
   $('#fx-add').addEventListener('click', () => openFishForm(null));
+  const del = $('#fx-del'); if (del) del.addEventListener('click', () => confirmDeleteArchived());
   const add2 = $('#fx-add2'); if (add2) add2.addEventListener('click', () => openFishForm(null));
   admBody.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
     const id = b.dataset.id, act = b.dataset.act;
@@ -3323,6 +3374,28 @@ function renderFishTab(){
     else if (act === 'archive') confirmArchive(id, true);
     else if (act === 'restore') confirmArchive(id, false);
   }));
+}
+function confirmDeleteArchived(){
+  const n = A.data.fish.filter(f => f.archivedAt).length; if (!n) return;
+  // Step 1: the warning. Step 2: a separate final button. Nothing is deleted until the second button is pressed.
+  openDialog('Delete archived fish forever?', `<div class="stack" id="da-step1">
+    <p><strong>${n} archived fish will be permanently deleted</strong>: their stars, level-ups, history, family links and client records.</p>
+    <p><strong>Once deleted, it is gone and cannot be brought back.</strong> Active fish are not touched. If you might need a child's progress later, give the family their summary first, or keep the fish archived.</p>
+    <div class="dlg-actions"><button class="btn" type="button" data-close>Keep them archived</button><button class="btn warn" type="button" id="da-next">I understand, continue</button></div></div>`, () => {
+    $('#dlg-body').querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeDialog));
+    $('#da-next').addEventListener('click', () => {
+      $('#dlg-body').innerHTML = `<div class="stack">
+        <p><strong>Final step.</strong> Press the button below to delete the ${n} archived fish for good.</p>
+        <p class="err" id="da-err" role="alert"></p>
+        <div class="dlg-actions"><button class="btn" type="button" data-close>Cancel</button><button class="btn warn" type="button" id="da-go">Delete ${n} archived fish forever</button></div></div>`;
+      $('#dlg-body').querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeDialog));
+      $('#da-go').addEventListener('click', async e => {
+        e.target.disabled = true; e.target.textContent = 'Deleting…';
+        try { const k = await store.deleteArchivedFish(); closeDialog(); renderTab(); showToast(k ? `${k} archived fish deleted.` : 'There were no archived fish to delete.'); }
+        catch (err) { e.target.disabled = false; e.target.textContent = `Delete ${n} archived fish forever`; $('#da-err').textContent = err && err.friendly ? err.message : 'Couldn’t delete. Check your connection and try again.'; }
+      });
+    });
+  });
 }
 function confirmArchive(id, archive){
   const f = fishById(id);
@@ -3338,11 +3411,11 @@ function confirmArchive(id, archive){
     });
   });
 }
-/* --- Family summary (discharge): only approved milestones; never private notes or the client label --- */
+/* --- Family summary (discharge): only when milestones are shown to the family; never private notes or the client label --- */
 const aOrAn = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w;
 function familySummaryHTML(fid){
   const f = fishById(fid), achs = achFor(fid), d = deriveFish(achs);
-  const shown = achs.filter(a => a.status === 'active' && a.publicVisible).sort((a, b) => cmpLedger(b, a));
+  const shown = achs.filter(a => a.status === 'active' && (clientById(f.clientId) || {}).familyShowcase).sort((a, b) => cmpLedger(b, a));
   const evos = A.data.evolutions.filter(e => e.fishId === fid && !e.reversedAt).sort((a, b) => a.toLevel - b.toLevel);
   const active = achs.filter(a => a.status === 'active').sort(cmpLedger);
   const cv = document.createElement('canvas'); drawMini(cv, fishLook(f.id, f.species, f.palette), d.level, 300, 192);
@@ -3354,15 +3427,15 @@ function familySummaryHTML(fid){
     ${evos.length ? `<h2>Growing up</h2><ol>${evos.map(e => `<li><b>Grew into ${esc(aOrAn(stageName(e.toLevel)))}</b><span class="fs-date">${esc(fmtDay(e.achievedOn))}</span></li>`).join('')}</ol>` : ''}
     <h2>Milestones</h2>
     ${shown.length ? `<ol>${shown.map(a => `<li><b>${esc(a.title)} <span class="fs-date">· ${esc(unitsLabel(a.units))}</span></b>${esc(a.publicDescription)}<div class="fs-date">${esc(fmtDay(a.achievedAt))}</div></li>`).join('')}</ol>`
-      : `<p>${nick}’s therapist hasn’t approved any milestones for sharing yet.</p>`}
+      : `<p>${nick}’s therapist hasn’t chosen to show any milestones yet.</p>`}
     <p class="fs-note">Every star stands for practice and courage. Keep cheering ${nick} on at home!</p>
-    <p class="fs-foot">Little Ocean of Achievements · made ${esc(fmtDay(manilaToday()))}. This summary shows approved milestones only; private clinic notes are never included.</p>
+    <p class="fs-foot">Little Ocean of Achievements · made ${esc(fmtDay(manilaToday()))}. This summary shows milestones chosen for sharing only; private clinic notes are never included.</p>
   </article>`;
 }
 function openFamilySummary(fid){
   const f = fishById(fid); if (!f) return;
   openDialog(`Family summary for ${f.nickname}`, `<div class="stack">
-    <p class="hint">A keepsake for the family, for example when therapy ends. It shows the nickname, level, stars and approved milestones. Private notes and the client label are never included.</p>
+    <p class="hint">A keepsake for the family, for example when therapy ends. It shows the nickname, level, stars and the milestones you chose to show the family (the “Show milestones to the family” setting). Private notes and the client label are never included.</p>
     <div class="fs-wrap" id="fs-prev">${familySummaryHTML(fid)}</div>
     <p class="hint">To save a PDF, choose <strong>Save as PDF</strong> as the printer.</p>
     <div class="dlg-actions"><button class="btn" type="button" data-close>Close</button><button class="btn primary" type="button" id="fs-print">Print or save as PDF</button></div></div>`, () => {
@@ -3396,10 +3469,13 @@ async function openFamilyLink(fid){
   try { active = (await store.familyLinks()).find(l => l.fishId === fid) || null; } catch (e) {}
   const body = $('#dlg-body'); if ($('#dlg').hidden) return;
   body.innerHTML = `<div class="stack">
-    <p class="hint">A private link (and QR code) that lets ${esc(f.nickname)}’s family see their own child’s fish and the milestones you approved, on their phone. It never shows other children, private notes or the client label.</p>
-    ${active ? `<p><strong>A family link is turned on</strong> since ${esc(fmtWhen(active.createdAt))}${active.lastUsedAt ? `, last opened ${esc(fmtWhen(active.lastUsedAt))}` : ', not opened yet'}.</p>
+    <p class="hint">A private link (and QR code) that lets ${esc(f.nickname)}’s family see their own child’s fish and the milestones you chose to show (the “Show all milestones in the family aquarium” setting under Edit), on their phone. It never shows other children, private notes or the client label.</p>
+    ${active ? `<p><strong>A family link is turned on</strong> since ${esc(fmtWhen(active.createdAt))}${active.lastUsedAt ? `, last opened ${esc(fmtWhen(active.lastUsedAt))}` : ', not opened yet'}. ${active.expiresAt ? `It works until <strong>${esc(fmtWhen(active.expiresAt))}</strong>.` : 'It does not expire.'}</p>
       <p class="hint">For safety, a link is shown only once, when it’s made. If the family lost it, make a new one: the old link stops working straight away.</p>` : ''}
     <label class="check"><input type="checkbox" id="fl-ok"> The family agreed to a private family link (consent form, box 3)</label>
+    <div class="field"><label for="fl-dur">How long should the link work?</label><select id="fl-dur"><option value="day">1 day</option><option value="week" selected>1 week</option><option value="month">1 month (30 days)</option></select>
+      <p class="hint">After that the link stops working by itself. Make a new link whenever the family needs more time.</p></div>
+    ${c.familyShowcase ? '<p class="hint">Milestones are switched on for this family.</p>' : '<p class="hint"><strong>Milestones are switched off for this family</strong>, so they will see the fish and its level-ups only. Switch them on under Edit → “Show all milestones in the family aquarium”.</p>'}
     <p class="err" id="fl-err" role="alert"></p>
     <div class="dlg-actions"><button class="btn" type="button" data-close>Close</button>${active ? '<button class="btn warn" type="button" id="fl-off">Turn off link</button>' : ''}<button class="btn primary" type="button" id="fl-make" disabled>${active ? 'Make a new link' : 'Make link'}</button></div></div>`;
   body.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeDialog));
@@ -3413,11 +3489,11 @@ async function openFamilyLink(fid){
   $('#fl-make').addEventListener('click', async e => {
     e.target.disabled = true; $('#fl-err').textContent = '';
     let token;
-    try { token = await store.createFamilyLink(fid); }
+    let made; try { made = await store.createFamilyLink(fid, $('#fl-dur').value); token = made.token; }
     catch (err) { e.target.disabled = false; $('#fl-err').textContent = err && err.friendly ? err.message : 'Couldn’t make the link. Check your connection and try again.'; return; }
     const url = familyUrl(token);
     body.innerHTML = `<div class="stack">
-      <p><strong>${esc(f.nickname)}’s family link is ready.</strong> Send it only to this child’s parents or guardians, in a private chat. Anyone who has it can see this one fish and its approved milestones.</p>
+      <p><strong>${esc(f.nickname)}’s family link is ready.</strong> Send it only to this child’s parents or guardians, in a private chat. Anyone who has it can see this one fish and its milestones${made.expiresAt ? ` until <strong>${esc(fmtWhen(made.expiresAt))}</strong>` : ''}.</p>
       <label class="field"><span>Link</span><input class="fl-url" id="fl-url" readonly value="${esc(url)}"></label>
       <canvas class="fl-qr" id="fl-qr" aria-label="QR code for ${esc(f.nickname)}’s family link"></canvas>
       <p class="hint" id="fl-qr-note">The family can scan this QR code with their phone camera.</p>
@@ -3447,9 +3523,9 @@ async function openFamilyHome(fid){
     <fieldset class="seg wrap"><legend>House</legend>${radios('fh-house', HOUSES, cur.house)}</fieldset>
     <fieldset class="seg wrap"><legend>Fence</legend>${radios('fh-fence', FENCES, cur.fence, true)}</fieldset>
     <fieldset class="stack" id="fh-peo"><legend>Bubbles: Person · Environment · Occupation</legend>
-      <canvas class="hh-prev" id="fh-peo-prev" style="aspect-ratio:100/34;background:linear-gradient(#bfe8f2,#8ccfe2)" aria-label="Preview of the bubbles"></canvas>
+      <canvas class="hh-prev" id="fh-peo-prev" style="aspect-ratio:100/52;background:linear-gradient(#bfe8f2,#8ccfe2)" aria-label="Preview of the bubbles"></canvas>
       ${PEO_KEYS.map(k => `<div class="peo-row"><label for="fh-sz-${k}">${esc(PEO_LABEL[k][0])}</label><input type="range" id="fh-sz-${k}" min="1" max="5" step="1" value="${peo[k].size}" aria-label="${esc(PEO_LABEL[k][0])} size, 1 smallest to 5 largest"><input type="color" id="fh-col-${k}" value="${peo[k].color}" aria-label="${esc(PEO_LABEL[k][0])} colour"></div>`).join('')}
-      <p class="hint">A bigger bubble means more emphasis on that part for this family right now (1 = least, 5 = most).</p>
+      <p class="hint">A bigger bubble means more emphasis on that part for this family right now (1 = least, 5 = most). The bubbles float together, and the family can poke them.</p>
     </fieldset>
     <p class="err" id="fh-err" role="alert"></p>
     <div class="dlg-actions"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="submit" id="fh-save">Save</button></div></form>`;
@@ -3458,9 +3534,11 @@ async function openFamilyHome(fid){
   const prev = () => { const cv = $('#fh-prev'), d = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth || 320, h = Math.round(w*.62);
     cv.width = Math.round(w*d); cv.height = Math.round(h*d); const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); paintHome(g, val('fh-house'), val('fh-fence') || null, w, h); };
   const peoNow = () => sanitizePeo(Object.fromEntries(PEO_KEYS.map(k => [k, {size: $('#fh-sz-' + k).value, color: $('#fh-col-' + k).value}])));
-  const prevPeo = () => { const cv = $('#fh-peo-prev'), d = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth || 320, h = Math.round(w*.34), p = peoNow();
+  const prevPeo = () => { const cv = $('#fh-peo-prev'), d = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth || 320, h = Math.round(w*.52), p = peoNow(), rr = {};
     cv.width = Math.round(w*d); cv.height = Math.round(h*d); const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0);
-    PEO_KEYS.forEach((k, i) => paintBubble(g, w*[.2, .5, .8][i], h/2, h*.46*(.66 + .16*p[k].size)/1.46, p[k].color, PEO_LABEL[k][0])); };
+    for (const k of PEO_KEYS) rr[k] = .66 + .16*p[k].size;
+    const lay = peoLayout(rr), sc = Math.min((w - 16)/lay.bw, (h - 10)/lay.bh);
+    PEO_KEYS.forEach(k => paintBubble(g, w/2 + lay.pos[k][0]*sc, h/2 + lay.pos[k][1]*sc, rr[k]*sc, p[k].color, PEO_LABEL[k][0], 'both', lay.lo[k])); };
   $('#fh').addEventListener('change', prev); $('#fh').addEventListener('input', prevPeo); $('#fh').addEventListener('change', prevPeo); requestAnimationFrame(() => { prev(); prevPeo(); });
   $('#fh').addEventListener('submit', async e => {
     e.preventDefault(); const b = $('#fh-save'); b.disabled = true; $('#fh-err').textContent = '';
@@ -3486,8 +3564,12 @@ function openFishForm(id){
   openDialog(f ? `Edit ${f.nickname}` : 'Add a fish', `<form id="ff" class="stack" novalidate>
     <fieldset><legend>Private client details</legend>
       <div class="field"><label for="ff-label">Private label <span>(only you see this)</span></label><input type="text" id="ff-label" maxlength="60" value="${esc(c.label || '')}" placeholder="e.g. Sample client J (fictional)"><p class="err" id="e-label"></p></div>
-      <label class="check"><input type="checkbox" id="ff-consent" ${c.shareConsent ? 'checked' : ''}> The family has consented to sharing approved achievements</label>
-      <p class="hint">Without consent, only the nickname, level and stars are shown. Fictional data only during development.</p>
+      <label class="check"><input type="checkbox" id="ff-consent" ${c.shareConsent ? 'checked' : ''}> The family has consented to sharing in the aquarium</label>
+      <p class="hint">Without consent, this fish stays out of the shared aquarium. Fictional data only during development.</p>
+      <div class="stack" style="gap:6px;margin-top:10px"><h3 style="margin:0;font-size:1rem">Show all milestones</h3>
+        <label class="check"><input type="checkbox" id="ff-fam" ${c.familyShowcase ? 'checked' : ''}> Show all milestones in the family aquarium (family link)</label>
+        <label class="check"><input type="checkbox" id="ff-aq" ${c.aquariumShowcase ? 'checked' : ''}> Also show milestones on the main aquarium</label>
+        <p class="hint" id="ff-aq-hint">One tick covers every milestone, past and future. Untick to hide them all again. The main aquarium also needs the family’s consent above. Private notes are never shown.</p></div>
     </fieldset>
     <fieldset><legend>Fish</legend>
       <canvas class="fish-preview" id="ff-prev" aria-hidden="true"></canvas>
@@ -3505,7 +3587,7 @@ function openFishForm(id){
     <div class="dlg-actions"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="submit" id="ff-save">${f ? 'Save changes' : 'Add fish'}</button></div>
   </form>`, () => {
     const lvl = f ? deriveFish(achFor(f.id)).level : 1;
-    const read = () => ({level: $('#ff-sp').value === sp0 ? Infinity : lvl, label: $('#ff-label').value, consent: $('#ff-consent').checked, nickname: $('#ff-nick').value, species: $('#ff-sp').value, persona: $('#ff-persona').value,
+    const read = () => ({level: $('#ff-sp').value === sp0 ? Infinity : lvl, label: $('#ff-label').value, consent: $('#ff-consent').checked, family: $('#ff-fam').checked, aquarium: $('#ff-aq').checked, nickname: $('#ff-nick').value, species: $('#ff-sp').value, persona: $('#ff-persona').value,
       palette: {body: $('#ff-body').value, fin: $('#ff-fin').value, pat: $('#ff-pat').value}});
     const prev = () => { const v = read(), cv = $('#ff-prev'); drawMini(cv, fishLook(id || 'new', v.species, v.palette), lvl, cv.clientWidth || 300, 120); };
     ['ff-body','ff-fin','ff-pat','ff-sp'].forEach(k => $('#' + k).addEventListener('input', prev));
@@ -3526,7 +3608,7 @@ function openFishForm(id){
       const warn = nicknameWarning(v.nickname, v.label), key = v.nickname + '|' + v.label;
       if (warn && nickConfirmed !== key){ nickConfirmed = key; $('#w-nickname').textContent = warn; $('#w-nickname').hidden = false; $('#ff-save').textContent = 'Use this nickname anyway'; $('#ff-nick').focus(); return; }
       saving = true; $('#ff-save').disabled = true; $('#ff-save').textContent = 'Saving…';
-      try { if (id) await store.updateFish(id, v); else await store.createFish(v); closeDialog(); renderTab(); }
+      try { let fid2 = id; if (id) await store.updateFish(id, v); else fid2 = await store.createFish(v); await store.setSharing(fid2, v.family, v.aquarium); closeDialog(); renderTab(); }
       catch (err) { saving = false; $('#ff-save').disabled = false; $('#ff-save').textContent = saveLabel(); $('#ff-err').textContent = err && err.friendly ? err.message : 'Couldn’t save. Check your connection and try again.'; }
     });
   });
@@ -3555,7 +3637,7 @@ function renderAward(){
       <div class="field"><label for="aw-note">Private therapist note <span>(optional, never shared)</span></label><textarea id="aw-note" rows="3" maxlength="1000"></textarea><p class="err" id="e-note"></p></div>
       <div class="field"><label for="aw-date">Date achieved</label><input type="date" id="aw-date" value="${manilaToday()}" max="${manilaToday()}"><p class="err" id="e-date"></p></div>
       <div class="field"><label for="aw-area">Category <span>(optional, for progress notes)</span></label><select id="aw-area"><option value="">Not tagged</option>${Object.entries(AREAS).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
-      <div class="stack" style="gap:4px"><label class="check"><input type="checkbox" id="aw-share"> Approve the title and description for the shared profile</label><p class="hint" id="aw-share-hint"></p></div>
+      <p class="hint">Whether this child's milestones are shown to the family or on the main aquarium is set once per child under Fish &amp; clients → Edit.</p>
       <p class="err" id="aw-err" role="alert"></p>
       <button class="btn primary big" type="submit" id="aw-save">Save achievement</button>
     </form></section>
@@ -3576,16 +3658,15 @@ function refreshAward(){
 }
 function awardValues(){
   return {key: A.award.key, fishId: $('#aw-fish').value, units: Number((document.querySelector('input[name=aw-units]:checked') || {}).value), title: $('#aw-title').value, desc: $('#aw-desc').value,
-    note: $('#aw-note').value, date: $('#aw-date').value, publicVisible: $('#aw-share').checked, goalArea: $('#aw-area').value || null};
+    note: $('#aw-note').value, date: $('#aw-date').value, publicVisible: false, goalArea: $('#aw-area').value || null};
 }
 function updateAwardPreview(){
   if (!$('#aw')) return;
   const v = awardValues(), f = fishById(v.fishId); if (!f) return;
-  const c = clientById(f.clientId) || {}, d = deriveFish(achFor(f.id)), u = v.units || 0, total = d.units + u, lv = 1 + Math.floor(total / 10), cur = total % 10;
-  $('#aw-share-hint').textContent = c.shareConsent ? 'Family consent is on file. Leave unticked to keep this one private.' : 'No family consent on file, so this stays private even if approved. Change consent under Fish & clients.';
-  $('#aw-prev').innerHTML = `<p>${esc(f.nickname)} now: ${fmtStars(d.currentUnits)} of 5 stars · Level ${d.level}</p>
+  const c = clientById(f.clientId) || {}, d = deriveFish(achFor(f.id)), u = v.units || 0, total = d.units + u, lv = 1 + Math.floor(total / UNITS_PER_LEVEL), cur = total % UNITS_PER_LEVEL;
+  $('#aw-prev').innerHTML = `<p>${esc(f.nickname)} now: ${fmtStars(d.currentUnits)} of ${fmtStars(UNITS_PER_LEVEL)} stars · Level ${d.level}</p>
     <div class="stars sm" aria-hidden="true">${starRow(d.currentUnits)}</div>
-    <p style="margin-top:10px">After this award: ${lv > d.level ? `<strong>evolves to Level ${lv} · ${esc(stageName(lv))}!</strong> New level starts at ${fmtStars(cur)} of 5.` : `${fmtStars(cur)} of 5 stars`}</p>
+    <p style="margin-top:10px">After this award: ${lv > d.level ? `<strong>evolves to Level ${lv} · ${esc(stageName(lv))}!</strong> New level starts at ${fmtStars(cur)} of ${fmtStars(UNITS_PER_LEVEL)}.` : `${fmtStars(cur)} of ${fmtStars(UNITS_PER_LEVEL)} stars`}</p>
     <div class="stars sm" aria-hidden="true">${starRow(cur)}</div>
     <p class="hint" style="margin-top:10px">Lifetime stars: ${fmtStars(d.units)} → ${fmtStars(total)}</p>`;
 }
@@ -3612,7 +3693,7 @@ function renderAwardDone(){
   admBody.innerHTML = `<section class="card stack" style="max-width:640px">
     <div class="done ${evolved ? 'evo' : ''}">
       <h3>${evolved ? `${esc(f.nickname)} evolved into a ${esc(stageName(d.level))}!` : 'Achievement saved'}</h3>
-      <p>${esc(unitsLabel(dn.units))} for “${esc(dn.title)}”. ${esc(f.nickname)} is at Level ${d.level} with ${fmtStars(d.currentUnits)} of 5 stars (${fmtStars(d.units)} lifetime).</p>
+      <p>${esc(unitsLabel(dn.units))} for “${esc(dn.title)}”. ${esc(f.nickname)} is at Level ${d.level} with ${fmtStars(d.currentUnits)} of ${fmtStars(UNITS_PER_LEVEL)} stars (${fmtStars(d.units)} lifetime).</p>
       ${evolved ? `<p>The celebration plays the next time the aquarium is open on each device.</p>` : ''}
       <div class="row">${evolved ? `<a class="btn primary" href="#aquarium">Watch the celebration</a>` : ''}<button class="btn ${evolved ? '' : 'primary'}" type="button" id="dn-again">Award another</button><button class="btn" type="button" id="dn-hist">See history</button></div>
     </div></section>`;
@@ -3756,7 +3837,7 @@ function renderHistory(){
     <section class="card stack">
       <div class="field" style="max-width:420px"><label for="hx-fish">Fish</label><select id="hx-fish">${all.map(x => `<option value="${esc(x.id)}" ${x.id === f.id ? 'selected' : ''}>${esc(x.nickname)}${x.archivedAt ? ' (archived)' : ''}</option>`).join('')}</select></div>
       <div class="row between">
-        <div><h2>${esc(f.nickname)} · Level ${d.level} ${esc(stageName(d.level))}</h2><p class="hint">${fmtStars(d.currentUnits)} of 5 stars toward the next evolution · ${fmtStars(d.units)} lifetime · <span class="lock"><svg aria-hidden="true"><use href="#i-lock"/></svg>${esc(c.label || '')}</span></p></div>
+        <div><h2>${esc(f.nickname)} · Level ${d.level} ${esc(stageName(d.level))}</h2><p class="hint">${fmtStars(d.currentUnits)} of ${fmtStars(UNITS_PER_LEVEL)} stars toward the next evolution · ${fmtStars(d.units)} lifetime · <span class="lock"><svg aria-hidden="true"><use href="#i-lock"/></svg>${esc(c.label || '')}</span></p></div>
         <div class="row">${f.archivedAt ? '' : `<button class="btn primary" type="button" id="hx-award">Award stars</button>`}${d.level >= 2 && !f.archivedAt ? `<button class="btn" type="button" id="hx-replay">Replay celebration</button>` : ''}</div>
       </div>
     </section>
@@ -3775,11 +3856,15 @@ function renderHistory(){
     ({edit: openEditAch, points: openPointsAch, void: openVoidAch})[b.dataset.led](a);
   }));
 }
+function ledgerSharePill(a){
+  const c = clientById((fishById(a.fishId) || {}).clientId) || {};
+  return c.familyShowcase || (c.aquariumShowcase && c.shareConsent) ? '<span class="pill ok">Shown by child setting</span>' : '<span class="pill off">Not shown</span>';
+}
 function ledgerItem(a){
   const status = a.status === 'active' ? '' : a.status === 'voided' ? '<span class="pill warn">Voided</span>' : '<span class="pill warn">Replaced by correction</span>';
   const repl = a.correctionOf ? `<span class="pill gold">Correction</span>` : '';
   return `<li class="led ${a.status !== 'active' ? 'void' : ''}">
-    <div class="led-top"><span class="act-time">${esc(fmtDay(a.achievedAt))}</span><span class="pill gold">${unitsLabel(a.units)}</span>${a.goalArea ? `<span class="pill area">${esc(ALL_AREAS[a.goalArea] || a.goalArea)}</span>` : ''}${a.publicVisible ? '<span class="pill ok">Approved to share</span>' : '<span class="pill off">Private</span>'}${status}${repl}</div>
+    <div class="led-top"><span class="act-time">${esc(fmtDay(a.achievedAt))}</span><span class="pill gold">${unitsLabel(a.units)}</span>${a.goalArea ? `<span class="pill area">${esc(ALL_AREAS[a.goalArea] || a.goalArea)}</span>` : ''}${ledgerSharePill(a)}${status}${repl}</div>
     <p class="led-title">${esc(a.title)}</p>
     <p class="led-desc">${esc(a.publicDescription)}</p>
     ${a.privateNote ? `<p class="led-note"><span class="lock"><svg aria-hidden="true"><use href="#i-lock"/></svg>Private note:</span> ${esc(a.privateNote)}</p>` : ''}
@@ -3806,21 +3891,18 @@ function correctionDialog(title, inner, onSave){
   });
 }
 function openEditAch(a){
-  const c = clientById((fishById(a.fishId) || {}).clientId) || {};
   correctionDialog('Edit achievement details', `
     <div class="field"><label for="cx-title">Title</label><input type="text" id="cx-title" maxlength="60" value="${esc(a.title)}"><p class="err" id="e-title"></p></div>
     <div class="field"><label for="cx-desc">Child-friendly description</label><textarea id="cx-desc" rows="3" maxlength="240">${esc(a.publicDescription)}</textarea><p class="err" id="e-desc"></p></div>
     <div class="field"><label for="cx-note">Private note <span>(never shared)</span></label><textarea id="cx-note" rows="3" maxlength="1000">${esc(a.privateNote || '')}</textarea></div>
     <div class="field"><label for="cx-date">Date achieved</label><input type="date" id="cx-date" value="${esc(a.achievedAt)}" max="${manilaToday()}"><p class="err" id="e-date"></p></div>
     <div class="field"><label for="cx-area">Category <span>(optional)</span></label><select id="cx-area"><option value="">Not tagged</option>${AREA_ROWS.filter(r => !r.archivedAt || r.id === a.goalArea).map(r => `<option value="${r.id}" ${a.goalArea === r.id ? 'selected' : ''}>${esc(r.nameEn)}${r.archivedAt ? ' (hidden)' : ''}</option>`).join('')}</select></div>
-    <label class="check"><input type="checkbox" id="cx-share" ${a.publicVisible ? 'checked' : ''}> Approved for the shared profile</label>
-    ${c.shareConsent ? '' : '<p class="hint">No family consent on file, so this stays private either way.</p>'}
     <p class="hint">To change the number of stars, use Change stars instead.</p>`, async reason => {
     const v = {units: a.units, fishId: a.fishId, title: $('#cx-title').value, desc: $('#cx-desc').value, note: $('#cx-note').value, date: $('#cx-date').value};
     const errs = validateAward(v, manilaToday());
     for (const k of ['title','desc','date']) $('#e-' + k).textContent = errs[k] || '';
     if (Object.keys(errs).length) return false;
-    const ch = {title: v.title.trim(), publicDescription: v.desc.trim(), privateNote: v.note.trim(), achievedAt: v.date, publicVisible: $('#cx-share').checked};
+    const ch = {title: v.title.trim(), publicDescription: v.desc.trim(), privateNote: v.note.trim(), achievedAt: v.date, publicVisible: a.publicVisible};
     const area = $('#cx-area').value || null, areaChanged = area !== (a.goalArea || null);
     const fieldsChanged = ['title','publicDescription','privateNote','achievedAt','publicVisible'].some(k => ch[k] !== (a[k] ?? (k === 'privateNote' ? '' : a[k])));
     if (!fieldsChanged && !areaChanged) return 'Nothing has changed yet.';
@@ -3840,10 +3922,10 @@ function openPointsAch(a){
   });
 }
 function openVoidAch(a){
-  const d = deriveFish(achFor(a.fishId)), after = d.units - a.units, drop = 1 + Math.floor(after / 10) < d.level;
+  const d = deriveFish(achFor(a.fishId)), after = d.units - a.units, drop = 1 + Math.floor(after / UNITS_PER_LEVEL) < d.level;
   correctionDialog('Void this achievement?', `
     <p>“${esc(a.title)}” (${unitsLabel(a.units)}) will stop counting toward stars. It stays in the history, marked as voided.</p>
-    ${drop ? `<p class="err">This lowers ${esc((fishById(a.fishId) || {}).nickname || 'the fish')} to Level ${1 + Math.floor(after / 10)}. The evolution record stays in the log, marked as undone.</p>` : ''}`,
+    ${drop ? `<p class="err">This lowers ${esc((fishById(a.fishId) || {}).nickname || 'the fish')} to Level ${1 + Math.floor(after / UNITS_PER_LEVEL)}. The evolution record stays in the log, marked as undone.</p>` : ''}`,
     async reason => () => store.voidAchievement(a.id, reason));
 }
 
@@ -4202,6 +4284,6 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && !window.cl
 // Hooks for the automated checks
 window.__ocean = {get fish(){ return fish; }, REACTIONS, state, handleTap, startReaction, pickReaction, deriveFish, validateAward, validateFish, openProfile, closeProfile, DOUBLE_MS,
   get store(){ return store; }, SupabaseStore, A, P, evoQueue, replayEvolution, TL, createMemoryDB, Store, resolveTheme, mergeThemes, validateSchedule, BUILTIN_THEMES,
-  makeBackupSql, nicknameWarning, familySummaryHTML, drawMini, fishLook, SPECIES, tr, TXT, setFocus, pollDelay, certificateCanvas, areaProgress, get AREAS(){ return AREAS; }, get AREA_ROWS(){ return AREA_ROWS; }, DEFAULT_AREA_ROWS, STARTER_TEMPLATES, starterTemplateRows, openQuickAward, familyUrl, HOUSES, FENCES, paintHome, paintBubble, sanitizePeo, PEO_KEYS, get famPeo(){ return famPeo; }, get famHome(){ return famHome; }, get familyMode(){ return familyMode; }, idleFor(ms){ lastActivity = Date.now() - ms; }, get allFish(){ return lastPubs; }, get lang(){ return curLang; }, get currentTheme(){ return currentTheme; }, get THEMES(){ return THEMES; }, applyPrefs, setPref, applyTheme, processImage, tparts};
+  makeBackupSql, nicknameWarning, familySummaryHTML, drawMini, fishLook, SPECIES, tr, TXT, setFocus, pollDelay, certificateCanvas, areaProgress, get AREAS(){ return AREAS; }, get AREA_ROWS(){ return AREA_ROWS; }, DEFAULT_AREA_ROWS, STARTER_TEMPLATES, starterTemplateRows, openQuickAward, familyUrl, HOUSES, FENCES, paintHome, paintBubble, sanitizePeo, PEO_KEYS, peoPoke, get peoLast(){ return peoLast; }, get famPeo(){ return famPeo; }, _testFamily(home, peo){ familyMode = true; famState = 'ok'; famHome = home; famPeo = sanitizePeo(peo); document.body.classList.add('family-mode'); }, get famHome(){ return famHome; }, get familyMode(){ return familyMode; }, idleFor(ms){ lastActivity = Date.now() - ms; }, get allFish(){ return lastPubs; }, get lang(){ return curLang; }, get currentTheme(){ return currentTheme; }, get THEMES(){ return THEMES; }, applyPrefs, setPref, applyTheme, processImage, tparts};
 })();
 </script>
